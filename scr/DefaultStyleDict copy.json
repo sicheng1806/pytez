@@ -1,0 +1,12 @@
+{
+    "fill" : null ,
+    "stroke" : "1pt+luma(0%)",
+    "radius" : 1,
+    "shorten" : "LINEAR",
+    "padding" : null,
+    "circle" : {
+        "radius" : "auto" ,
+        "stroke" : "auto" ,
+        "fill" : "auto" 
+    }
+}
