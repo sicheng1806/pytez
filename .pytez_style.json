@@ -1,0 +1,13 @@
+{
+    "fill": null,
+    "stroke": {
+        "paint": "k",
+        "thickness":1,
+        "cap":"butt",
+        "join":"miter",
+        "dash":"solid"
+    },
+    "hidden": false,
+    "alpha":1,
+    "zorder":null
+}

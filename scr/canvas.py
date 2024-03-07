@@ -1,339 +1,326 @@
-'''
-这个模块实现了pytez的主要接口——Canvas类
-
-此模块和其他模块的关系：
-
-绘图流程决定的关系
-========================
-
-图形绘制流程
----------------
-1. 用户调用canvas的绘图函数，传入坐标、图形样式、其他mpl参数
-2. 由Position类解析传入的坐标，得到绝对数据坐标
-3. 由StyleManager类解析传入的样式，得到可直接使用的样式参数
-4. 由绝对数据坐标、解析后样式和mpl参数得到相应的图形类
-5. 将图形类注册到Canvas.ax的子类中，交由mpl控制绘图
-6. 补充: Canvas类的状态由上下文管理器CanvasCTX管理，位置解析和样式解析都需要结合Canvas的状态处理。
-
-图形绘制流程关系
-------------------
-1. Canvas类需要调用Position类和StyleManager类用于处理数据，Position类和StyleManager类需要调用Canvas类相应的状态属性来处理数据
-2. Canvas类使用CanvasCTX类管理状态
-3. CanvasCTX类具有PosCTX类用来储存坐标，StyleCTX类储存样式，BasicCTX类储存Canvas的debug和background属性等基本属性。
-
-作图流程
-------------
-
-1. 新建Canvas类
-2. 绘图
-   * 使用绘图方法
-   * 设置样式、变换、当前位置等等状态
-'''
-
-
 from matplotlib.axes import Axes
 from matplotlib.projections import register_projection
-import matplotlib.pyplot as plt 
-from .context import CanvasCtx
-from .position import parse_pos
-from .anchor import Anchor
+from argparse import Namespace
+import numpy as np 
+import re 
+import json
+
+from error import AnchorNameNotFoundError
+from scr.argument import standardize_style
+from node import Node
+
+RE_find_anchor = r"[a-z|_][a-z|_|\d]*(\.[a-z|_|\d]+)?" # 命名与python变量命名一致
+RE_anchor = r"[a-z|_|\d]+" #anchor字符串允许的样式
+RE_float = r"-?(\d+(\.\d+)?|\.\d+)"
 
 class CanvasAxes(Axes):
-    '''
-    一个Canvas类调用的Axes子类，直角坐标系投影，基本与之相同，目前建立这个类，是方便预留投影和预设一些参数
+    '''在Axes的基础上增加了canvas属性用于作为cetz风格的绘图接口
     '''
     name = "canvas"
-    def clear(self):
-        super().clear()
-        self.axis(False)
-    def get_canvas(self):
-        pass
-
-class _BaseCanvas():
-    '''
-    Canvas的基类
-    '''
-
-class Canvas():
-    '''
-    用于绘图的主要类，api类processing和ctez。
-
-    Canvas的接口设计
-    ====================
-    
-    属性
-    -----
-    (为保证安全性,不支持对属性直接修改，须使用对应的方法)
-
-    **数据坐标系统** 
-
-    1. ``_context`` CanvasCTX类型 
-       存储变换矩阵、当前坐标、当前样式和debug属性、backgourd属性的上下文管理器
-    2. ``_prematrixes`` 列表类型  
-       使用过的变换矩阵
-    3. ``_maxprematrixes`` int
-       变换矩阵序列存储的最大长度，默认15
-    4. ``bounds`` (float,float) 
-       坐标系的边界值,由_context属性返回
-    5. ``curpos`` (float,float)
-       当前位置,由_context属性返回
-    6. ``transform`` (3,3)数组
-       2维坐标系的变换矩阵，由_context属性返回
-    7. ``maxprematrixes`` int
-       变换矩阵序列存储的最大长度，由_maxprematrixes返回
-    8. ``prematrixes`` list
-       使用过的变换矩阵，由_prematrixes返回
-    
-    **样式**
-
-    1. ``curstyle`` dict 
-       以字典类型返回当前样式,由_context属性返回
-    
-    **命名系统和锚点** 
-
-    1. ``_anchors`` dict    
-       储存所有锚点的字典
-    2. ``anchors`` dict 
-       储存所有锚点的字典,由_anchors返回
-    3. ``_children`` list 
-       储存所有的绘图元素以及锚点类
-    4. ``children`` list 
-       储存所有的绘图元素以及锚点类，由_children属性返回
-    
-    **图层和其他属性** 
-
-    1. ``_zorder`` int 
-       返回当前所处的图层序号
-    2. ``zorder`` int 
-       返回当前所处的图层序号,由_zorder类返回
-    3. ``_fig`` 
-    4. ``fig`` 
-    5. ``_ax`` Axes
-       返回用于绘图对应的Axes类型
-    6. ``ax`` Axes
-       返回用于绘图对应的Axes类型，由_ax返回
-    8. ``_tmpchildren`` 支持with语句临时储存子类，支持with语句的对象一般是含组的。
-
-    方法
-    -------
-    **数据坐标系统**
-
-    1. ``get_curpos()`` 返回当前坐标
-    2. ``get_origin()`` 返回当前原点在绝对坐标系统的坐标
-    3. ``get_ctx`` 返回上下文管理器
-    4. ``moveto(pos)`` 设置当前坐标
-    5. ``rotate(angle,origin=(0,0))`` 过点绕轴旋转
-    6. ``translate(vetc)`` 向向量vetc方向位移
-    7. ``scale(x,y)`` 放缩变换
-    8. ``set_viewport(from,to,bounds)`` 设置子坐标系
-    9. ``set_origin(pos)`` 设置坐标原点
-    10. ``set_ctx(mat,style,debug,zorder,background)`` 设置部分上下文
-
-    **样式** 
-
-    1. ``set_style(fill,strick,**style_special)`` 设置当前默认样式
-    
-    **命名系统与锚点** 
-
-    1. ``get_anchors()`` 返回锚点命名列表
-    2. ``anchor(name,pos)`` 设置一个新的指定位置的锚点，类型为Anchor。
-    3. ``copy_anchors(element_from,filter=None)`` 从Canvas类复制锚点
-    4. ``get_child(name=None,index=None)`` 获取一个注册后的绘图元素，默认返回最后一个元素。
-    
-    **图层和其他**
-
-    1. ``get_ax()`` 获取Axes
-    2. ``set_zorder()`` 设置当前图层序号
-    3. ``add_shape()`` 添加图形元素
-
-    **绘图方法**
-
-    1. ``circle``
-    2. ``circle_through``
-    3. ``arc``
-    4. ``arc_through``
-    5. ``mark``
-    6. ``line`` 
-    7. ``grid``
-    8. ``text``
-    9. ``rect``
-    10. ``bezier`` 
-    11. ``bezier_through``
-    12. ``catmull``
-    13. ``hobby``
-    15. ``merge_path``
-    16. ``intersections``
-    17. ``group`` 
-    '''
-    def __init__(self,
-                 fig=None,
-                 debug=False,
-                 backgroud="w",
-                 maxprematrixes = 15,
-                 **axes_kw
+    def __init__(self, fig,
+                 *args,
+                 facecolor=None,  # defaults to rc axes.facecolor
+                 frameon=True,
+                 sharex=None,  # use Axes instance's xaxis info
+                 sharey=None,  # use Axes instance's yaxis info
+                 label='',
+                 xscale=None,
+                 yscale=None,
+                 box_aspect=None,
+                 **kwargs
                  ):
+        super().__init__(fig, *args, facecolor=facecolor, frameon=frameon, sharex=sharex, sharey=sharey, label=label, xscale=xscale, yscale=yscale, box_aspect=box_aspect, **kwargs)
+        self.set_aspect("equal")
+        self.grid(False)
+        self.xaxis.set_visible(False)
+        self.yaxis.set_visible(False)
+        self.canvas = Canvas(self)
+    
+class Canvas():
+    '''绘图的主要接口'''
+
+    def __init__(self,ax) -> None:
+        self.ax = ax
+        self.ctx = Namespace(
+            nodes={},
+            prev=np.array((0,0)),
+            style = self._get_style_by_json(".pytez_style.json"),
+            xlim=[0,1],ylim=[0,1],
+            padding={"top":1,"bottom":1,"left":1,"right":1},
+            _other_nodes=[])
+        self._autoscale()
+
+    
+
+    def _load_default_style(self,style_dct,support_keys,name=None):
+        '''用默认字典填充样式字典'''
+        for k in support_keys:
+            if k in style_dct: continue
+            if name is not None and name in self.ctx.style and k in self.ctx.style[name] and self.ctx.style[name][k] is not None:
+                style_dct[k] = self.ctx.style[name][k]
+            elif k in self.ctx.style:
+                style_dct[k] = self.ctx.style[k]
+        return style_dct
+
+    def _get_style_by_json(self,fname):
+        _must_keys = ("stroke","fill","hatch","alpha","zorder","hidden","clipon")
+        with open(fname,'r') as f:
+            dct = json.loads(f.read())
+        if not (set(dct)>=set(_must_keys)) : raise ValueError("缺少必要的style键")
+        for k in _must_keys:
+            dct[k] = standardize_style(k,dct[k])
+        return dct
+
+    def pos(self,pos,_update=True):
+        '''根据状态返回坐标值,并更新prev状态,
+        1. update,to 用于指定是否更新当前位置，坐标参照位置
+        2. x,y | angle,radius | name,anchor | 分别代表直角坐标，极坐标，锚点表示法
+        3. rel:pos 相对坐标
         '''
-        参数
-        ------
-        fig : ``Matplotlib.figure.Figure`` ; 默认为当前figure，如果没有将会自动创建。 
-            设置Canvas的figure。
-
-        debug : ``bool`` ; 默认为False 
-            是否启用调试模式，若启用将会将图形的画框以红色线条绘制出来。
-
-        backgroud : ``str`` 或者 ``Color`` 
-            设置画板的背景色，优先级高于axes的参数
-        
-        axes_kw : axes的参数设置，具体参见matplotlib.axes.Axes。
-        '''
-        # 建立与mpl接口
-        self._fig = fig if fig else plt.figure()
-        axes_kw["projection"] = "canvas" if "canvas" not in axes_kw else axes_kw["projection"]
-        self._ax = self.fig.add_subplot(**axes_kw)
-        self._contenxt = CanvasCtx(debug=debug,background=backgroud,zorder=0)
-        self._prematrixes = [] 
-        self._maxprematrixes = maxprematrixes
-        self._anchors = {}
-        self._children = []
-        self._zorder = 0
-        self._tmpchildren = []
-
-
-    # CTX
-    @property
-    def pos_ctx(self):
-        return self._contenxt.get_pos_ctx()
-    @property
-    def style_ctx(self):
-        return self._contenxt.get_style_ctx()
-    @property
-    def basic_ctx(self):
-        return self._contenxt.get_basic_ctx()
-    # 坐标系统
-    @property
-    def bounds(self):
-        return self._contenxt.get_bounds()
-    @property
-    def curpos(self):
-        return self._contenxt.get_curpos()
-    @property
-    def transform(self):
-        return self.get_tmat()
-    @property
-    def maxprematrixes(self):
-        return self._maxprematrixes
-    @property
-    def prematrixes(self):
-        return self._prematrixes
-    # 样式
-    @property
-    def curstyle(self):
-        return self._contenxt.get_curstyle()
-    # 命名系统和锚点
-    @property
-    def anchors(self):
-        return self._anchors
-    @property
-    def children(self):
-        return self._children
-    # 图层和其他属性
-    @property
-    def zorder(self):
-        return self._zorder
-    @property
-    def fig(self):
-        return self._fig
-    @property
-    def ax(self):
-        return self._ax 
+        update = _update
+        to = self.ctx.prev
+        if isinstance(pos,str):
+            if not re.fullmatch(RE_find_anchor,pos): raise ValueError("锚点语法错误")
+            if "." in pos :
+                name,anchor = pos.split(".")
+            else:
+                name = pos
+                anchor = None
+            return self.pos({
+                "name":name,
+                "anchor":anchor,
+            })
+        if isinstance(pos,dict):
+            # 保证键参数正确
+            conflict_dct = {"x":1,"y":1,"rel":2,"angle":3,"radius":3,"update":0,"to":0,"name":4,"anchor":4} #通过数字映射完成冲突管理
+            conflict_num = 0
+            for k in pos.keys():
+                if conflict_num != conflict_dct[k]:
+                    if  conflict_num * conflict_dct[k] != 0 :
+                        raise ValueError()
+                    else : conflict_num = conflict_num + conflict_dct[k]
+            #                 
+            if "update" in pos:
+                if not isinstance(pos["update"],bool):
+                    raise ValueError("update键必需是bool值")
+                update = pos["update"] 
+            if "to" in pos:
+                to = self.pos(pos["to"],_update=False)
+            match conflict_num :
+                case 1 : 
+                    x = 0 if "x" not in pos else pos["x"]
+                    y = 0 if "y" not in pos else pos["y"]
+                    try:
+                        xy =  np.array((x,y),dtype="float")
+                    except:
+                        raise TypeError("坐标参数类型错误")
+                case 2 : 
+                    if isinstance(pos,dict) and "rel" in pos["rel"]: raise ValueError("rel键中不可再嵌套rel")
+                    xy =  to + self.pos(pos["rel"])
+                case 3 : 
+                    angle = 0 if "angle" not in pos else pos["angle"]
+                    radius = 0 if "radius" not in pos else pos["radius"]
+                    angle = self._parse_arg(angle,"angle") # 
+                    xy = np.array((radius* np.cos(angle),radius * np.sin(angle)),dtype="float")
+                case 4 :
+                    if "name" not in pos.keys() : raise ValueError("在使用anchor表示法时，必需指定命名")
+                    name = pos["name"]
+                    if name not in self.ctx.nodes.keys() : raise AnchorNameNotFoundError(f"{name}未找到：尚未注册")
+                    anchor = None if "anchor" not in pos.keys() else pos["anchor"]
+                    xy = self.ctx.nodes[name].calculate_anchors(anchor)
+            if update :
+                self._update_prev(xy)
+            self._update_lim(*xy) # 更新数据集，每一个pos操作都会更新
+            return xy # 第一个出口
+        try:
+            pos = np.array(pos)
+        except :
+            raise 
+        if pos.shape == (0,):     # 输入为 ()，取当前坐标
+            return self.ctx.prev #第二个出口
+        if pos.shape != (2,):
+            raise ValueError("坐标类型必需为2维")
+        if isinstance(pos[0],str):
+            return self.pos({"angle":pos[0],"radius": float(pos[1])}) # 相当于处理了一下参数又传入字典类型
+        return self.pos({"x":pos[0],"y":pos[1]}) 
     
-    
-    def _parse_anchor(self,anchor:str):
-        '''解析锚点'''
-        obj,name = anchor.split('.',1)
-        if obj not in self.anchors:
-            raise AttributeError(f"{anchor} 未注册")
-        obj = self.anchors[obj]
-        return self.obj.get_anchor(name)
+    def _register_node(self,name,node):
+        for a in node.iter_artists():
+            self.ax.add_artist(a)
+            self._autoscale()
+        if name is not None: self.ctx.nodes[name] = node
+        else: self.ctx._other_nodes.append(node)
+        return node
 
-    def parse_position(self,*pos_dct_ls):
-        '''将各种表示法的坐标转化为绝对数据坐标系统坐标'''
-        for pos_dct in pos_dct_ls:
-            if "anchor" in pos_dct:
-                yield self._parse_anchor(pos_dct["anchor"])
-            else: 
-                yield parse_pos(pos_dct=pos_dct,transform=self.transform,curpos=self.curpos)    
-    def parse_style(self,style_dct):
-        '''将pytez类型的样式和mpl类型的样式转化为无冲突的mpl类型的样式字典,pytez优先'''
-        pass
-    
-    def anchor(self,name,anchor_or_pos):
-        '''注册一个新的锚点'''
-        if not isinstance(anchor_or_pos,Anchor):
-            pos = self.parse_position(anchor_or_pos)
-            anchor = Anchor()
-            anchor.new_anchor(name,pos)
+    def _update_lim(self,x=None,y=None):
+        if x is not None:
+            if x < self.ctx.xlim[0] : self.ctx.xlim[0] = x 
+            if x > self.ctx.xlim[1] : self.ctx.xlim[1] = x 
+        if y is not None: 
+            if y < self.ctx.ylim[0] : self.ctx.ylim[0] = y 
+            if y > self.ctx.ylim[1] : self.ctx.ylim[1] = y
+
+    def _set_lim(self,xmin=None,xmax=None,ymin=None,ymax=None):
+        if xmin is not None: self.ctx.xlim[0] = xmin 
+        if xmax is not None: self.ctx.xlim[1] = xmax 
+        if ymin is not None: self.ctx.ylim[0] = ymin
+        if ymax is not None: self.ctx.ylim[1] = ymax
+
+    def _update_prev(self,xy):
+        try:
+            xy = np.array(xy)
+        except Exception : 
+            raise TypeError()
+        if xy.shape == (2,):
+            self.ctx.prev = xy
         else:
-            anchor = anchor_or_pos
-        self.anchors[name] = anchor
-    def _register_shape(self,shape):
-        self.ax.add_artist(shape)
-        self._children.append(shape)
-    def circle(self,position,radius:float|tuple[float,float]=1,name=None,anchor="center",**style_or_kwmpl):
-        '''
-        绘制一个圆或者椭圆
-
-        参数
-        -----
-        position : ``位置坐标`` 或者其的列表，具体参见表示位置的方法。
-            图案的位置，和anchor共同决定中心的位置。
-        
-        name : ``str`` ; 默认为None
-            图形的命名
-        
-        radius :  ``float`` or ``(float,float)`` 或者其的列表 ; 默认为1
-            圆的半径或者椭圆的长短轴，a表示x轴方向的轴，b表示y轴方向的轴。
-        
-        anchor: ``锚点字符串`` 或其列表  ， 具体请参考表示锚点的方法 ; 默认为 "center"
-            图像的要绘制的锚点位置
-        
-        **style: style的参数，具体请参考style的参数设置
-        '''
-        pos = self.parse_position(*position) # 位置点获取，
-        kw_mpl = self.parse_style(style_or_kwmpl) # 获取kw_mpl
-        _content = Circle(pos,radius=radius,anchor=anchor,**kw_mpl) # 构建
-        if name is not None:
-            self.anchor(name,_content)
-        self._register_shape(_content)
-
-    def set_style(self,
-                  fill:str|None,
-                  stroke:dict|str,
-                  *style_special
-                  ):
-        '''
-        设置画板的样式
-        
-        参数
-        -------
-        fill : ``颜色`` ，具体参考表示颜色的方式 ; 默认为None
-            图案的默认填充色
-        
-        stroke : ``stroke参数`` ， 具体参考stroke的参数设置 ; 默认为None
-            图案的边界线
-        
-        style_special : ``dict`` ; 默认为None
-            对特定的图案的样式进行设置
-        '''
-        pass
+            raise ValueError()
     
+    def _parse_arg(self,value,vtype):
+        '''angle 转成弧度制, '''
+        match vtype:
+            case "angle" : 
+                if isinstance(value,float):
+                    return np.radians(value)
+                elif isinstance(value,str):
+                    if re.fullmatch(RE_float+r"deg",value):
+                        return np.radians(float(value[:-3]))
+                    elif re.fullmatch(RE_float+r"rad",value):
+                        return float(value[:-3])
+            case _ :
+                raise ValueError()
+
+    def _autoscale(self,scalex=True,scaley=True):
+        '''使用ctx中的xlim和ylim自动放缩'''
+        if scalex:
+            self.ax.set_xlim([self.ctx.xlim[0] - self.ctx.padding["left"],self.ctx.xlim[1] + self.ctx.padding["right"]])
+        if scaley:
+            self.ax.set_ylim([self.ctx.ylim[0] - self.ctx.padding["bottom"],self.ctx.ylim[1] + self.ctx.padding["top"]])
+
+    def autoscale(self,scalex=True,scaley=True):
+        '''自动放缩，以适应画面'''
+        self.ctx.xlim = [0,1]
+        self.ctx.ylim = [0,1]
+        nodes = self.ctx.nodes.values().extend(self.ctx._other_nodes)
+        for n in nodes:
+            _lim = n.get_lim()
+            self._update_lim(*_lim[:2])
+            self._update_lim(*_lim[2:])
+        self._autoscale(scalex=scalex,scaley=scaley)
+    
+    def set_style(self,name=None,**style):
+        '''更新默认字典的内容'''
+        _must_standardize = ("fill","stroke","alpha","hidden","zorder")
+        if name is None:
+            for k,v in style.items():
+                if k in _must_standardize: self.ctx.style[k] = standardize_style(k,v)
+                else: self.ctx.style[k] = v
+        else:
+            if name not in self.ctx.style:
+                _dct = {}
+                for k,v in style.items():
+                    if k in _must_standardize: _dct[k] = standardize_style(k,v)
+                    else: _dct[k] = v 
+                self.ctx.style[name] = _dct
+            else:
+                for k,v in style.items():
+                    if k in _must_standardize: self.ctx.style[name][k] = standardize_style(k,v)
+                    else: self.ctx.style[name][k] = v
+
+    def path(self,*segments,name=None,**style):
+        support_keys = ("fill","stroke","alpha","zorder","hidden")
+        style = self._load_default_style(style,support_keys=support_keys,name="line")
+        _segments = [[] for i in range(len(segments))]
+        for i,seg in enumerate(segments):
+            for cmd in seg:
+                _cmd = [cmd[0]]
+                _cmd.extend(map(self.pos,cmd[1:]))
+                _segments[i].append(_cmd)
+        node_dct = {
+            "name":name,
+            "drawables" : []
+        }
+        for segment in _segments:
+            node_dct["drawables"].append({
+                "type":"path",
+                "segments": segment,
+            } | style )
+        node = Node(**node_dct)
+        return self._register_node(name,node)
+
+    def _path_by_xy(self,*segments,name=None,**style):
+        support_keys = ("fill","stroke","alpha","zorder","hidden")
+        style = self._load_default_style(style,support_keys=support_keys,name="line")
+        node_dct = {
+            "name":name,
+            "drawables" : []
+        }
+        for segment in segments:
+            node_dct["drawables"].append({
+                "type":"path",
+                "segments": segment,
+            } | style )
+        node = Node(**node_dct)
+        return self._register_node(name,node)
+
+    def line(self,*pos,name=None,**style):
+        return self.path([("line",*pos)],name=name,**style)
+
+    def bezier(self,start,end,ctr1,ctr2,name = None,**style):
+        return self.path([("cubic",start,end,ctr1,ctr2)],name=name,**style)
+    
+    def rect(self,a,b,name=None,**style):
+        a,b = map(self.pos,(a,b))
+        return self.path([
+            ("line",a,(b[0],a[1]),b,(a[0],b[1]),a),
+        ],name=name,**style)
+
+    def circle(self,center,name=None,**style):
+        radius = float(style.pop("radius"))
+        center = np.array(center)
+        MAGIC = 0.2652031
+        SQRTHALF = np.sqrt(0.5)
+        MAGIC45 = SQRTHALF * MAGIC
+
+        vertices = np.array([[0.0, -1.0],
+
+                             [MAGIC, -1.0],
+                             [SQRTHALF-MAGIC45, -SQRTHALF-MAGIC45],
+                             [SQRTHALF, -SQRTHALF],
+
+                             [SQRTHALF+MAGIC45, -SQRTHALF+MAGIC45],
+                             [1.0, -MAGIC],
+                             [1.0, 0.0],
+
+                             [1.0, MAGIC],
+                             [SQRTHALF+MAGIC45, SQRTHALF-MAGIC45],
+                             [SQRTHALF, SQRTHALF],
+
+                             [SQRTHALF-MAGIC45, SQRTHALF+MAGIC45],
+                             [MAGIC, 1.0],
+                             [0.0, 1.0],
+
+                             [-MAGIC, 1.0],
+                             [-SQRTHALF+MAGIC45, SQRTHALF+MAGIC45],
+                             [-SQRTHALF, SQRTHALF],
+
+                             [-SQRTHALF-MAGIC45, SQRTHALF-MAGIC45],
+                             [-1.0, MAGIC],
+                             [-1.0, 0.0],
+
+                             [-1.0, -MAGIC],
+                             [-SQRTHALF-MAGIC45, -SQRTHALF+MAGIC45],
+                             [-SQRTHALF, -SQRTHALF],
+
+                             [-SQRTHALF+MAGIC45, -SQRTHALF-MAGIC45],
+                             [-MAGIC, -1.0],
+                             [0.0, -1.0],
+                            ],
+                            dtype=float)
+        vertices  = vertices * radius + center
+        segment = [["cubic"] for i in  range(8)]
+        for i in range(8):
+            segment[i].extend([vertices[3*i],vertices[3*i+3],vertices[3*i+1],vertices[3*i+2]])
+        return self.path(segment,name=name,**style)
 
 register_projection(CanvasAxes)
-
-if __name__ == '__main__':
-    import matplotlib.pyplot as plt
-    c = Canvas()
-    c.circle((0,0),name="Circle")
-    #c.set_style(fill="red",stroke=None)
-    #c.circle("circle.east",radius= 0.3)
-    plt.show()

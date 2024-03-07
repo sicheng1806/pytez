@@ -1,0 +1,2 @@
+class AnchorNameNotFoundError(Exception):
+    pass 
