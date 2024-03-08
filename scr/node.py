@@ -6,7 +6,7 @@ from scipy.integrate import quad
 import re 
 from matplotlib.colors import to_rgb
 
-from scr.argument import standardize_stroke,standardize_style
+from argument import standardize_stroke,standardize_style_dct
 
 RE_float = r"-?(\d+(\.\d+)?|\.\d+)"
 RE_anchor = r"[a-z|_|\d]+" #anchor字符串允许的样式
@@ -173,7 +173,7 @@ class Node():
             for seg in d["segments"]:
                 verts.extend(seg[1:])
         xs,ys = zip(*verts)
-        return min(xs),max(xs),min(ys),max(ys)
+        return (min(xs),min(ys)),(max(xs),max(ys))
 
     def _get_debug_segments(self):
         xmin,xmax,ymin,ymax = self._get_debug_box()

@@ -61,10 +61,5 @@ def _main():
     plt.show()
 
 if __name__ == '__main__':
-    fig = plt.figure()
-    ax = fig.add_subplot(projection="canvas")
-    cv = ax.canvas
-    cv.circle((0,0),name="circle",radius = 1)
-    cv.line((0,0),(10,10),name="line")
-    plt.show()
+    _main()
     

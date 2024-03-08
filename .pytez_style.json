@@ -1,5 +1,6 @@
 {
     "fill": null,
+    "hatch": null,
     "stroke": {
         "paint": "k",
         "thickness":1,
@@ -9,5 +10,6 @@
     },
     "hidden": false,
     "alpha":1,
-    "zorder":null
+    "zorder":null,
+    "clipon":true
 }

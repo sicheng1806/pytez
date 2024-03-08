@@ -1,6 +1,11 @@
 '''
 '''
+import numpy as np
+import re
 from matplotlib.colors import to_rgba
+
+RE_float = r"-?(\d+(\.\d+)?|\.\d+)"
+DefaultStyleValue = {"hidden":False,"fill":None,"hatch":None,"stroke":None,"alpha":1,"zorder":None,"clipon":True}
 
 def standardize_color(color):
     return to_rgba(color)
@@ -56,37 +61,80 @@ def standardize_stroke(stroke):
     else:
         raise TypeError(f"{stroke}类型错误,支持的stroke类型为stroke_str和字典类型")
 
-def standardize_style(style_name,value):
-    _style_str = ("fill","hatch","stroke","color","alpha","zorder","hidden","clipon") # patheffects 暂不支持
+def standardize_style_arg(style_name,value):
+    _style_str = DefaultStyleValue # patheffects 暂不支持
+    _hatch_str = ('/', '\\', '|', '-', '+', 'x', 'o', 'O', '.', '*',None)
+    if style_name not in _style_str: raise ValueError(f"{style_name}不是合法的style值,合法值有{_style_str.keys()}")
+    if value == None: return  _style_str[style_name]
     match style_name:
         case "fill" : 
-            if value is None : return value 
-            else : return standardize_color(value)
+            value =  standardize_color(value)
         case "hatch" : 
-            pass
-        case "stroke": return standardize_stroke(value)
-        case "color" : return standardize_color(value)
+            if value not in _hatch_str: raise ValueError(f"{value}不是支持的hatch值，支持的值有{_hatch_str.keys()}")
+        case "stroke": value =  standardize_stroke(value)
         case "alpha" : 
             try:
                 value = float(value)
                 if not (0<=value<=1): raise
             except : 
                 raise TypeError(f"{value}不是支持的alpha值,合法值为0-1的实数")
-            return value
         case "zorder" : 
-            if value is None : return value 
-            else: 
-                try:
-                    value = int(value)
-                except :
-                    raise ValueError(f"{value}不是支持的zorder值,zorder为None或者int")
-            return value
+            try:
+                value = int(value)
+            except :
+                raise ValueError(f"{value}不是支持的zorder值,zorder为None或者int")
         case "hidden" :
             try:
                value = bool(value)
             except:
                 raise TypeError(f"{value}不是合法的hidden值,合法值为bool")
-        case _ : raise ValueError(f"{style_name}不是合法的style值,合法值有{_style_str}")
+    return value
+
+def standardize_style_dct(style_dct):
+    _must_checked = DefaultStyleValue.keys()
+    if not isinstance(style_dct,dict): raise TypeError(f"{style_dct}不是支持的style类型，style必需为dict类型")
+    for k in style_dct:
+        if k in _must_checked: style_dct[k] = standardize_style_arg(k,style_dct[k])
+        if isinstance(style_dct[k],dict):
+            for k_2 in style_dct[k] : 
+                if k_2 in _must_checked: style_dct[k][k_2] = standardize_style_arg(k,style_dct[k][k_2])
+    for k in _must_checked:
+        if k not in style_dct:
+            style_dct[k] = standardize_style_arg(k,None) # 如果必须的值未在字典类，使用默认值填充
+    return style_dct
+
+def standardize_transform(t):
+    try:
+        t = np.array(t,dtype=float)
+        if t.shape != (3,3) or np.linalg.det(t) == 0: raise
+    except:
+        raise ValueError(f"{t}不是支持的transform值，支持(3,3)的数组类型且可逆的变换矩阵")
+    return t
+
+def standardize_xy(xy):
+    try:
+        xy = np.array(xy,dtype=float)
+        if xy.shape != (2,): raise 
+    except :
+        raise TypeError(f"{xy}不是合法的xy参数值，合法值为二元实数组")
+    return xy 
+
+def standardiz_angle(angle):
+    if isinstance(angle,str):
+        _angle = angle
+        if re.fullmatch(RE_float+r"deg",angle):
+            angle =  np.radians(float(angle[:-3]))
+        elif re.fullmatch(RE_float+r"rad",angle):
+            angle = float(angle[:-3])
+    try:
+        angle = float(angle)
+    except : 
+        raise ValueError(f"{_angle}不是合法的angle值")
+    return angle
+
+
 
 if __name__ == '__main__':
     print(to_rgba("r")) # rgba接收三元数组嘛
+    import math 
+    math.ra
