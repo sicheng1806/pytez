@@ -5,14 +5,11 @@ import numpy as np
 import re 
 import json
 
-from error import AnchorNameNotFoundError
-from argument import standardize_style_arg,standardize_style_dct,standardize_xy,standardiz_angle
+from argument import standardize_style_dct,standardize_xy,standardiz_angle,get_drawable
 from matrix import get_transformed_xy
 from node import Node
 
-RE_find_anchor = r"[a-z|_][a-z|_|\d]*(\.[a-z|_|\d]+)?" # 命名与python变量命名一致
-RE_anchor = r"[a-z|_|\d]+" #anchor字符串允许的样式
-
+from argument import DefaultStyleValue,RE_find_anchor
 
 class CanvasAxes(Axes):
     '''在Axes的基础上增加了canvas属性用于作为cetz风格的绘图接口
@@ -56,7 +53,6 @@ class Canvas():
     @property 
     def ctx(self):
         return self._ctx
-
     # style 管理
     def _get_style_by_json(self,fname):
         with open(fname,'r') as f:
@@ -88,7 +84,7 @@ class Canvas():
         update = _update
         _has_transform = True
         to = self.ctx.prev
-        if isinstance(pos,str):
+        if isinstance(pos,str): #锚点字符串
             if not re.fullmatch(RE_find_anchor,pos): raise ValueError(f"{pos}不是支持的锚点值，锚点格式错误")
             if "." in pos :
                 name,anchor = pos.split(".")
@@ -103,7 +99,7 @@ class Canvas():
             return self.ctx.prev
         if not isinstance(pos,dict) and np.array(pos).shape == (2,):
             if isinstance(pos[0],str):
-                angle = standardiz_angle(angle)
+                angle = standardiz_angle(pos[0])
                 try:
                     radius = float(pos[1])
                 except : 
@@ -145,7 +141,7 @@ class Canvas():
                 case 4 :
                     if "name" not in pos.keys() : raise ValueError("在使用anchor表示法时，必需指定命名")
                     name = pos["name"]
-                    if name not in self.ctx.nodes.keys() : raise AnchorNameNotFoundError(f"{name}未找到：尚未注册")
+                    if name not in self.ctx.nodes.keys() : raise ValueError(f"Anchor:{name}未找到：尚未注册")
                     anchor = None if "anchor" not in pos.keys() else pos["anchor"]
                     xy =  self.ctx.nodes[name].calculate_anchors(anchor)
                     _has_transform = False
@@ -155,7 +151,14 @@ class Canvas():
             self._update_prev(xy)
         self._update_datalim(*xy) # 更新数据集，每一个pos操作都会更新
         return xy 
-         
+    ## prev
+    def _update_prev(self,xy):
+        self.ctx.prev = standardize_xy(xy)
+    def moveto(self,pos):
+        xy = self.pos(pos)
+        return self._update_prev(xy)
+    def moveto_xy(self,xy):
+        return self._update_prev(xy)
     # ax交互管理
     def _register_node(self,name,node):
         '''注册node，在创建node时使用一次'''
@@ -184,9 +187,7 @@ class Canvas():
             if ymax is not None: self.ctx.datalim[1][1] = float(ymax)
         except :
             raise ValueError(f"datalim参数错误")
-    ## prev
-    def _update_prev(self,xy):
-        self.ctx.prev = standardize_xy(xy)
+    
     ## autoscale
     def _autoscale(self,scalex=True,scaley=True):
         '''使用ctx中的xlim和ylim自动放缩'''
@@ -194,7 +195,6 @@ class Canvas():
             self.ax.set_xlim([self.ctx.datalim[0][0] - self.ctx.padding["left"],self.ctx.datalim[0][1] + self.ctx.padding["right"]])
         if scaley:
             self.ax.set_ylim([self.ctx.datalim[1][0] - self.ctx.padding["bottom"],self.ctx.datalim[1][1] + self.ctx.padding["top"]])
-
     def autoscale(self,scalex=True,scaley=True):
         '''自动放缩，以适应画面'''
         self.ctx.datalim[0] = [0,1]
@@ -205,9 +205,10 @@ class Canvas():
             self._update_datalim(*_lim[0])
             self._update_datalim(*_lim[1])
         self._autoscale(scalex=scalex,scaley=scaley)
+    
     # 绘图api
     def path(self,*segments,name=None,**style):
-        support_keys = ("fill","stroke","alpha","zorder","hidden")
+        support_keys = DefaultStyleValue.keys()
         style = self._load_default_style(style,support_keys=support_keys,name="line")
         _segments = [[] for i in range(len(segments))]
         for i,seg in enumerate(segments):
@@ -215,31 +216,13 @@ class Canvas():
                 _cmd = [cmd[0]]
                 _cmd.extend(map(self.pos,cmd[1:]))
                 _segments[i].append(_cmd)
-        node_dct = {
-            "name":name,
-            "drawables" : []
-        }
-        for segment in _segments:
-            node_dct["drawables"].append({
-                "type":"path",
-                "segments": segment,
-            } | style )
-        node = Node(**node_dct)
+        node = Node(drawables=[get_drawable(drawtype="path",segments=seg,**style) for seg in _segments],name=name,)
         return self._register_node(name,node)
 
-    def _path_by_xy(self,*segments,name=None,**style):
-        support_keys = ("fill","stroke","alpha","zorder","hidden")
+    def path_by_xy(self,*segments,name=None,**style):
+        support_keys = DefaultStyleValue.keys()
         style = self._load_default_style(style,support_keys=support_keys,name="line")
-        node_dct = {
-            "name":name,
-            "drawables" : []
-        }
-        for segment in segments:
-            node_dct["drawables"].append({
-                "type":"path",
-                "segments": segment,
-            } | style )
-        node = Node(**node_dct)
+        node = Node(drawables=[get_drawable(drawtype="path",segments=seg,**style) for seg in segments],name=name,)
         return self._register_node(name,node)
 
     def line(self,*pos,name=None,**style):
@@ -250,18 +233,16 @@ class Canvas():
     
     def rect(self,a,b,name=None,**style):
         a,b = map(self.pos,(a,b))
-        return self.path([
+        return self.path_by_xy([
             ("line",a,(b[0],a[1]),b,(a[0],b[1]),a),
         ],name=name,**style)
 
     def circle(self,center,radius = 1,name=None,**style):
-        center = np.array(center)
         MAGIC = 0.2652031
         SQRTHALF = np.sqrt(0.5)
         MAGIC45 = SQRTHALF * MAGIC
 
         vertices = np.array([[0.0, -1.0],
-
                              [MAGIC, -1.0],
                              [SQRTHALF-MAGIC45, -SQRTHALF-MAGIC45],
                              [SQRTHALF, -SQRTHALF],
@@ -295,10 +276,14 @@ class Canvas():
                              [0.0, -1.0],
                             ],
                             dtype=float)
-        vertices  = vertices * radius + center
+        center = self.pos(center)
+        vertices  = np.array(list(map(self.pos,vertices * radius))) + center
         segment = [["cubic"] for i in  range(8)]
         for i in range(8):
             segment[i].extend([vertices[3*i],vertices[3*i+3],vertices[3*i+1],vertices[3*i+2]])
-        return self.path(segment,name=name,**style)
+        node =  self.path_by_xy(segment,name=name,**style) # 生成且注册
+        self.moveto_xy(center)
+        return node
+        
 
 register_projection(CanvasAxes)

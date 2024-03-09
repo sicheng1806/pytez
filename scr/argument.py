@@ -4,8 +4,11 @@ import numpy as np
 import re
 from matplotlib.colors import to_rgba
 
+
 RE_float = r"-?(\d+(\.\d+)?|\.\d+)"
+RE_node_name= RE_anchor_name = r"[a-z|_|\d]+"
 DefaultStyleValue = {"hidden":False,"fill":None,"hatch":None,"stroke":None,"alpha":1,"zorder":None,"clipon":True}
+RE_find_anchor = r"[a-z|_][a-z|_|\d]*(\.[a-z|_|\d]+)?" # 命名与python变量命名一致
 
 def standardize_color(color):
     return to_rgba(color)
@@ -132,9 +135,55 @@ def standardiz_angle(angle):
         raise ValueError(f"{_angle}不是合法的angle值")
     return angle
 
+def standardize_drawable(drawable):
+    if not isinstance(drawable,dict): raise ValueError(f"{drawable}不是支持的drawable类型，支持dict类型")
+    if "type" not in drawable : raise ValueError(f"{drawable}缺少必需的键：type")
+    match drawable["type"]:
+        case "path":
+            drawable.pop("type")
+            kwargs = drawable
+            drawable = get_drawable(drawtype="path",**kwargs)
+            drawable["type"] = "path"
+        case _ :
+            raise ValueError(f"{drawable["type"]}不是支持的type键，目前支持(path,)")
+    return drawable
+
+def standardize_bezier_coef(coef):
+    try:
+        coef = np.array(coef,dtype=float)
+        if len(coef.shape) != 2 or coef.shape[0] != 2 or coef.shape[1] > 4 : raise 
+    except:
+        raise ValueError(f"{coef}不是合法的三次贝塞尔曲线的系数值")
+    if coef.shape == (2,2): coef = np.stack([coef.T[0],coef.T[1],[0,0],[0,0]],axis=1)
+    if coef.shape == (2,3): coef = np.stack([coef.T[0],coef.T[1],coef.T[2],[0,0]],axis=1)
+    return coef
+
+def get_drawable(drawtype="path",**kwargs):
+    '''标准化drawables为字典形式'''
+    _suppot_keys = {"path":("segments",*DefaultStyleValue.keys())}
+    drawable = {}
+    match drawtype:
+        case "path": #!segments,stroke,fill,hidden,zorder,alpha,
+            if set(kwargs) > set(_suppot_keys["path"]) : raise ValueError(f"{drawtype}类型drawable存在不支持的值")
+            if "segments" not in kwargs : raise ValueError(f"{drawtype}类型drawable缺少必需的键：segments键")
+            segments = kwargs.pop("segments")
+            style = standardize_style_dct(kwargs)
+            drawable["type"] = "path"
+            drawable["segments"] = segments
+            drawable |= style 
+        case _ : 
+            raise ValueError(f"{drawtype}不是支持的drawable类型")
+    return drawable
+#!
+def get_node_dct(drawables:list[dict],name=None):
+    if name is not None: 
+        if not isinstance(name,str) or not re.fullmatch(RE_node_name,name) : raise ValueError(f"{name}不是支持的Node名")
+    node_dct = {"name":name,"drawables":[]}
+    for drawable in drawables:
+        node_dct["drawables"].append(standardize_drawable(drawable))
+    return node_dct
+
 
 
 if __name__ == '__main__':
-    print(to_rgba("r")) # rgba接收三元数组嘛
-    import math 
-    math.ra
+    print(get_drawable(segments = ["line",(0,0),(1,1)],stroke="p:r,t:2"))

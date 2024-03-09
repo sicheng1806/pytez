@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt 
-from canvas import CanvasAxes
+from canvas import CanvasAxes,Canvas
 
 def _test_pos():
     '''测试直角坐标、极坐标和相对坐标的输入情况'''
@@ -13,6 +13,8 @@ def _test_pos():
     cv.circle(("60deg",10)) # (5,5sqrt(3))
     cv.circle({"x":5,"y":5}) # (5,5)
     cv.circle({"rel":(-5,-5)}) # (0,0)
+    cv.rect([0,0],[10,10])
+    cv.autoscale()
     plt.show()
 
 def _test_anchor():
@@ -28,8 +30,9 @@ def _test_anchor():
     c = (2,2)
     print(f"{cv.pos("line2.center")} == {c}")
     # 测试锚点的各种调用
-    for anchor in ("start","mid","end","center","north","south","east","west","30deg","30%",6):
-        print(f"line2 anchor:{anchor} => {cv.pos({"name":"line2","anchor":anchor})}")
+    for anchor in ("east","start","mid","end","center","north","south","west","30deg","30%",6):
+        pos = cv.pos({"name":"line2","anchor":anchor})
+        print(f"line2 anchor:{anchor} => {pos}")
     # 测试贝塞尔曲线的锚点
     cv.bezier((0,0),(10,3),(5,0),(5,3),name = "bezier")
     for anchor in ("start","mid","end","30%",6):
@@ -61,5 +64,5 @@ def _main():
     plt.show()
 
 if __name__ == '__main__':
-    _main()
+    pass
     
