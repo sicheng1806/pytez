@@ -2,11 +2,23 @@
 import numpy as np
 from scipy.integrate import quad
 
-from argument import standardize_xy,standardize_bezier_coef
+from utilities import to_xy
+
+
+
+def check_bezier_coef(coef):
+    try:
+        coef = np.array(coef,dtype=float)
+        if len(coef.shape) != 2 or coef.shape[0] != 2 or coef.shape[1] > 4 : raise 
+    except:
+        raise ValueError(f"{coef}不是合法的三次贝塞尔曲线的系数值")
+    if coef.shape == (2,2): coef = np.stack([coef.T[0],coef.T[1],[0,0],[0,0]],axis=1)
+    if coef.shape == (2,3): coef = np.stack([coef.T[0],coef.T[1],coef.T[2],[0,0]],axis=1)
+    return coef
 
 def ctrls_to_coef(*ctrls):
     '''支持二个或者四个控制点'''
-    ctrls = [standardize_xy(ctrl) for ctrl in ctrls]
+    ctrls = [to_xy(ctrl) for ctrl in ctrls]
     P = np.stack(ctrls,axis=1)
     match len(ctrls):
         case 2:
@@ -23,11 +35,11 @@ def ctrls_to_coef(*ctrls):
         case _:
             raise ValueError(f"长度为{len(ctrls)}的控制点序列暂不支持，只支持2,4")
     
-def segments_to_coefs(segments):
-    '''将segments转为控制点序列的序列,(N,2,4)'''
-    for seg in segments:
+def segment_to_coefs(segment):
+    '''将segment转为控制点序列的序列,(N,2,4)'''
+    for seg in segment:
         coeficients = []
-        for seg in segments:
+        for seg in segment:
             match seg[0]:
                 case "line":
                     for i in range(1,len(seg)-1):
@@ -71,11 +83,11 @@ def coefs_to_length_and_nodeweight(coefs):
 def get_bezier_point(coef,t):
     assert 0 <= t <= 1
     x_t,y_t = np.polynomial.Polynomial(coef=coef[0]),np.polynomial.Polynomial(coef=coef[1])
-    return standardize_xy((x_t(t),y_t(t)))
+    return to_xy((x_t(t),y_t(t)))
 
 def bezier_line_intersection(bezier_coef,line_point,line_vect):
-    line_point,line_vect = standardize_xy(line_point),standardize_xy(line_vect)
-    bezier_coef = standardize_bezier_coef(bezier_coef)
+    line_point,line_vect = to_xy(line_point),to_xy(line_vect)
+    bezier_coef = check_bezier_coef(bezier_coef)
     X0,Y0 = np.array([line_point[0],0,0,0]),np.array([line_point[1],0,0,0])
     An = line_vect[1] * (bezier_coef[0] - X0) - line_vect[0] * (bezier_coef[1] - Y0)
     #
@@ -139,7 +151,7 @@ def bezier_bezier_intersection():
 
 if __name__ == '__main__':
     print(bezier_line_intersection(
-        segments_to_coefs(
+        segment_to_coefs(
             [
                 ("cubic",(0,0),(10,4),(5,0),(5,4))
             ]

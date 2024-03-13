@@ -11,5 +11,12 @@
     "hidden": false,
     "alpha":1,
     "zorder":null,
-    "clipon":true
+    "clipon":true,
+    "mark":{
+        "width":1,
+        "height":1,
+        "angle":0,
+        "reverse":false,
+        "symbol":null
+    }
 }
