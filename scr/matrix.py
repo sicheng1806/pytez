@@ -18,7 +18,6 @@ def get_origin_by_transform(t):
     t = check_transform(t)
     x,y,_ = np.dot(t,np.array([[0],[0],1]))
     return np.array((x,y),dtype=float)
-# 获取坐标
 def get_xy_by_transform(t,xy):
     xy = _to_xy1(xy)
     t = check_transform(t)
@@ -57,6 +56,14 @@ def get_transform_by_viewport(mat,start,end,bounds = (1,1)):
     xscale,yscale = (end - start)/bounds
     mat = get_transform_by_scale(mat,xscale,yscale)
     return mat 
+def get_transform_by_reverse(mat,a,b,c):
+    A = np.array([
+        [a**2-b**2, 2*a*b , 2*a*c],
+        [2*a*b,  b**2-a**2,  2*b*c],
+        [0,0,-a**2-b**2]
+    ]) / (- a**2 - b**2)
+    return np.dot(mat,A)
+
 
 if __name__ == '__main__':
     pass

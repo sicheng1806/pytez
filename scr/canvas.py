@@ -3,7 +3,7 @@ from matplotlib.projections import register_projection
 import numpy as np 
 import re 
 
-from node import Node,_tg_style,_tg_style_check,get_drawable
+from node import Node,_tg_style,_tg_style_check,get_drawable,MarkDrawable
 from matrix import *
 from utilities import to_xy,to_rad,codes_vects_to_segment
 
@@ -290,6 +290,8 @@ class Canvas():
     def moveto(self,pos):
         xy = self.to_abs_pos(pos)
         return self._update_prev(xy)
+    def moveto_by_xy(self,xy):
+        return self._update_prev(xy)
     ## transform
     def set_transform(self,mat):
         return self.ctx.set_transform(mat)
@@ -307,11 +309,12 @@ class Canvas():
     def set_viewport(self,a,b,bounds=(1,1)):
         return self.set_transform(get_transform_by_viewport(self.ctx.transform,a,b,bounds))
     
-    def _register_node(self,name,node):
+    def register_node(self,node):
         '''注册node，在创建node时使用一次'''
         for a in node.iter_artists():
             self.ax.add_artist(a)
             self._autoscale()
+        name = node.name 
         if name is not None: self.ctx.nodes[name] = node
         else: self.ctx.unnamed_nodes.append(node)
         return node
@@ -339,7 +342,7 @@ class Canvas():
         nodes = list(self.ctx.nodes.values())
         nodes.extend(self.ctx.unnamed_nodes)
         for n in nodes:
-            _lim = n.get_lim() 
+            _lim = n.get_datalim() 
             self._update_datalim(*_lim[0])
             self._update_datalim(*_lim[1])
         self._autoscale(scalex=scalex,scaley=scaley)
@@ -390,22 +393,13 @@ class Canvas():
                             dtype=float)
         codes = [1]
         codes.extend([4 for i in range(len(vertices) - 1)])
-        return codes,vertices
+        return codes,np.array(vertices,dtype=float)
     @classmethod
     def UnitRect_CV(self):
         codes = [1,2,2,2,2]
         vects = [(0,0),(1,0),(1,1),(0,1),(0,0)]
-        return codes,vects
-    @classmethod
-    def getUnitMark_CV(self,mark_name):
-        _replace_dct = {">":"arrow"}
-        if mark_name in _replace_dct:
-            mark_name = _replace_dct[mark_name]
-        match mark_name:
-            case "arrow":
-                vects = [ (np.cos(np.pi*5/6),np.sin(np.pi*5/6)),(0,0),(np.cos(np.pi/3),np.sin(np.pi/3)) ]
-                codes = [ 1,2,2]
-                return codes,vects
+        return codes,np.array(vects,dtype=float)
+    
               
     ## basic drawing api
     def get_path_node(self,*segments,name=None,**style):
@@ -427,46 +421,43 @@ class Canvas():
 
     def line(self,*pos,name=None,**style):
         node = self.get_path_node([("line",*pos)],name=name,**style)
-        self._register_node(name,node)
+        self.register_node(node)
         return node
     
     def bezier(self,start,end,ctr1,ctr2,name = None,**style):
-        node =  self.get_path_node([("cubic",start,end,ctr1,ctr2)],name=name,**style)
-        self._register_node(name,node)
+        node =  self.get_path_node([("cubic",start,ctr1,ctr2,end)],name=name,**style)
+        self.register_node(node)
         return node
 
     def rect(self,a,b,name=None,**style):
         a,b = self.to_user_poses(a,b)
-        return self.get_path_node([
+        node =  self.get_path_node([
             ("line",a,(b[0],a[1]),b,(a[0],b[1]),a),
         ],name=name,**style)
+        return self.register_node(node)
     
-    def circle(self,center,radius = 1,name=None,**style):
-        codes,verts = self.UnitCircle_CV
+    def circle(self,center,name=None,**style):
+        style = self.load_style(style_dct=style,name="circle")
+        radius = style.pop("radius",(1,1))
         center = self.to_user_poses(center)[0]
+        codes,verts = self.UnitCircle_CV()
         verts = verts * radius + center
+        verts = self.to_abs_poses(*verts)
         segment = codes_vects_to_segment(codes=codes,vects=verts)
-        node =  self.get_path_node(segment,name=name,**style)
-        self.moveto_xy(center)
-        return self._register_node(name,node)
+        node = Node(name=name,drawables=[get_drawable(drawtype="path",segment=segment,**style)])
+        self.moveto_by_xy(center)
+        return self.register_node(node)
     
     def mark(self,start,to,name=None,**style):
         #style,segment -> drawable, + name -> node
         # 设置style
-        style = self._load_default_style(style,name="mark")
-        line_style = self._load_default_style(style_dct={"hidden":True},name="line")
+        style = self.load_style(style,name="line")
         # 设置字段
         start,to = self.to_abs_pos(start),self.to_abs_pos(to)
-        angle = (to - start)
-        codes,vects = self.getUnitMark_CV(">")
-        vects *= 0.1
-        vects = self.to_abs_poses(*vects)
-        segment = codes_vects_to_segment(codes,to+vects)
-        drawables = [] 
-        drawables.append(get_drawable(drawtype="path",segment=[("line",start,to)],**line_style))
-        drawables.append(get_drawable(drawtype="mark",segment=segment,**style))
-        node = Node(drawables=drawables,name=name)
-        return self._register_node(name=name,node=node)
+        #angle = (to - start)
+        mark_drawable = MarkDrawable.getMarkbyStyle(symbol='>',pos=[to],angle=0,**style)
+        node = Node(drawables=[mark_drawable],name=name)
+        return self.register_node(node=node)
         
         
 

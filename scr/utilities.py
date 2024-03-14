@@ -54,7 +54,7 @@ def codes_vects_to_segment(codes,vects):
                 segs[0].extend(_vects)
             case 4:
                 if i % 3 != 0 : raise ValueError(f"curbic路径有且只有4个参数,在这里i%3 == 0,你的 i = {i}")
-                segs = [["cubic",_vects[3*i],_vects[3*i+3],_vects[3*i+1],_vects[3*i+2]] for i in range(i // 3)]
+                segs = [["cubic",_vects[3*i],_vects[3*i+1],_vects[3*i+2],_vects[3*i+3]] for i in range(i // 3)]
             case _:
                 raise ValueError(f"{codes[2]}不支持的codes类型")
         return segs,codes,vects,last_endp
@@ -86,7 +86,7 @@ def segment_to_CV(segment):
                 if len(vects) == 0 or (vects[-1] != seg[1]).any():  # 无点或者不相接
                     vects.append(seg[1])
                     codes.append(Path.MOVETO)
-                vects.extend([seg[3],seg[4],seg[2]]) # cetz里面的第二参数为endPoint
+                vects.extend(seg[2:]) # cetz里面的第二参数为endPoint
                 codes.extend([Path.CURVE4]*3)
                 assert len(codes) == len(vects)
             case _: 

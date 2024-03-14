@@ -17,7 +17,7 @@ def check_bezier_coef(coef):
     return coef
 
 def ctrls_to_coef(*ctrls):
-    '''支持二个或者四个控制点'''
+    '''输入控制点，输入bezier曲线系数'''
     ctrls = [to_xy(ctrl) for ctrl in ctrls]
     P = np.stack(ctrls,axis=1)
     match len(ctrls):
@@ -45,7 +45,7 @@ def segment_to_coefs(segment):
                     for i in range(1,len(seg)-1):
                         coeficients.append(ctrls_to_coef(*seg[i:i+2]))
                 case "cubic":
-                    coeficients.append(ctrls_to_coef(seg[1],seg[3],seg[4],seg[2]))
+                    coeficients.append(ctrls_to_coef(*seg[1:]))
                 case _:
                     raise ValueError(f"{seg[0]}不是支持的segment类型")
         return np.array(coeficients,dtype=float)
