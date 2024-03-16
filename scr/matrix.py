@@ -63,7 +63,28 @@ def get_transform_by_reverse(mat,a,b,c):
         [0,0,-a**2-b**2]
     ]) / (- a**2 - b**2)
     return np.dot(mat,A)
-
+# 其他计算
+def get_circle_center_and_radius_by_3point(a,b,c):
+    a,b,c = map(to_xy,(a,b,c))
+    CM = np.array([[a[0],a[1],1],
+                    [b[0],b[1],1],
+                    [c[0],c[1],1]])
+    BM = - np.array([a[0]**2+a[1]**2,
+                    b[0]**2+b[1]**2,
+                    c[0]**2+c[1]**2])
+    try:
+        A,B,C = np.linalg.solve(CM,BM)
+    except Exception as e:
+        raise ValueError("%s,%s,%s can't not build a circle：%s" %(a,b,c,e))
+    center = -A/2,-B/2
+    radius = np.sqrt(-C+center[0]**2+center[1]**2)
+    return center,radius
+def xy_to_angle_radius(xy):
+    x,y = to_xy(xy)
+    if np.isclose(x,0) and np.isclose(y,0) : return 0,0
+    elif np.isclose(y,0): angle = 0 if x > 0 else np.pi 
+    else: angle = np.arccos(x/np.sqrt(x**2+y**2)) if y > 0 else - np.arccos(x/np.sqrt(x**2+y**2))
+    return angle , np.sqrt(x**2+y**2)
 
 if __name__ == '__main__':
     pass

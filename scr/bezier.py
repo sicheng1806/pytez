@@ -50,18 +50,26 @@ def segment_to_coefs(segment):
                     raise ValueError(f"{seg[0]}不是支持的segment类型")
         return np.array(coeficients,dtype=float)
 
+def coefs_to_area(coefs):
+    area = 0
+    for co in coefs:
+        x_t,y_t = np.polynomial.Polynomial(co[0]),np.polynomial.Polynomial(co[1])
+        dx_t,dy_t = x_t.deriv(1),y_t.deriv(1)
+        area += quad(lambda t: y_t(t)*dx_t(t)+ 2*x_t(t)*dy_t(t) , 0,1)[0] 
+    return area
+
 def coefs_to_center(coefs):
-        '''请保证你的路径闭合,coefs:(N,2,4)'''
-        area = 0 
-        intX = 0
-        intY = 0
-        for co in coefs:
-            x_t,y_t = np.polynomial.Polynomial(co[0]),np.polynomial.Polynomial(co[1])
-            dx_t,dy_t = x_t.deriv(1),y_t.deriv(1)
-            area += quad(lambda t: y_t(t)*dx_t(t)+ 2*x_t(t)*dy_t(t) , 0,1)[0] 
-            intX += quad(lambda t: x_t(t)**2*dy_t(t),0,1)[0]/2
-            intY += quad(lambda t: -y_t(t)**2*dx_t(t),0,1)[0]/2
-        return intX/area,intY/area
+    '''请保证你的路径闭合,且有面积,coefs:(N,2,4)'''
+    area = 0 
+    intX = 0
+    intY = 0
+    for co in coefs:
+        x_t,y_t = np.polynomial.Polynomial(co[0]),np.polynomial.Polynomial(co[1])
+        dx_t,dy_t = x_t.deriv(1),y_t.deriv(1)
+        area += quad(lambda t: y_t(t)*dx_t(t)+ 2*x_t(t)*dy_t(t) , 0,1)[0] 
+        intX += quad(lambda t: x_t(t)**2*dy_t(t),0,1)[0]/2
+        intY += quad(lambda t: -y_t(t)**2*dx_t(t),0,1)[0]/2
+    return intX/area,intY/area
 
 def coefs_to_length_and_nodeweight(coefs):
     lengths = []
@@ -144,8 +152,6 @@ def bezier_line_intersection(bezier_coef,line_point,line_vect):
 #!
 def bezier_bezier_intersection():
     pass 
-
-
 
 
 

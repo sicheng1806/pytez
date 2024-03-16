@@ -39,9 +39,10 @@ def codes_vects_to_segment(codes,vects):
             codes = codes[1:]
             vects = vects[1:]
         if last_endp is None :  raise ValueError(f"路径无起始点,codes[0] != moveto (or 1)")
+        i = 0
         for i in range(1,len(codes)): # i 是 相同code的长度
             if codes[i] != codes[0]: break
-        i = i + 1 if i == len(codes) - 1 else i 
+        i = i + 1 if codes[i] == codes[0] else i 
         _type = codes[0]
         _vects = list(vects[:i])
         _vects.insert(0,last_endp)
@@ -93,6 +94,72 @@ def segment_to_CV(segment):
                 raise ValueError("字段类型错误")
     return codes,vects
 
+def getUnitCircle_CV():
+    MAGIC = 0.2652031
+    SQRTHALF = np.sqrt(0.5)
+    MAGIC45 = SQRTHALF * MAGIC
+    vertices = np.array([[0.0, -1.0],
+                            [MAGIC, -1.0],
+                            [SQRTHALF-MAGIC45, -SQRTHALF-MAGIC45],
+                            [SQRTHALF, -SQRTHALF],
+
+                            [SQRTHALF+MAGIC45, -SQRTHALF+MAGIC45],
+                            [1.0, -MAGIC],
+                            [1.0, 0.0],
+
+                            [1.0, MAGIC],
+                            [SQRTHALF+MAGIC45, SQRTHALF-MAGIC45],
+                            [SQRTHALF, SQRTHALF],
+
+                            [SQRTHALF-MAGIC45, SQRTHALF+MAGIC45],
+                            [MAGIC, 1.0],
+                            [0.0, 1.0],
+
+                            [-MAGIC, 1.0],
+                            [-SQRTHALF+MAGIC45, SQRTHALF+MAGIC45],
+                            [-SQRTHALF, SQRTHALF],
+
+                            [-SQRTHALF-MAGIC45, SQRTHALF-MAGIC45],
+                            [-1.0, MAGIC],
+                            [-1.0, 0.0],
+
+                            [-1.0, -MAGIC],
+                            [-SQRTHALF-MAGIC45, -SQRTHALF+MAGIC45],
+                            [-SQRTHALF, -SQRTHALF],
+
+                            [-SQRTHALF+MAGIC45, -SQRTHALF-MAGIC45],
+                            [-MAGIC, -1.0],
+                            [0.0, -1.0],
+                        ],
+                        dtype=float)
+    codes = [1]
+    codes.extend([4 for i in range(len(vertices) - 1)])
+    return codes,np.array(vertices,dtype=float)
+
+def getUnitArc_CV(start,delta,*,n=None):
+    start,delta = to_rad(start),to_rad(delta)
+    if n is None:
+        theta = to_rad("11.25deg") if delta > 0 else to_rad("-11.25deg") 
+    else:
+        theta = delta // n  
+        assert theta < np.pi/4
+    assert not np.isclose(0,theta)
+    alphas =  np.arange(0,delta,4*theta) + start
+    alphas = np.append(alphas,start+delta)
+    _codes = [1,]
+    _vects = [np.array((np.cos(alphas[0]),np.sin(alphas[0])))]
+    for i in range(len(alphas) - 1):
+        _codes.extend([4,4,4])
+        t = abs(np.tan((alphas[i+1] - alphas[i])/4)*4/3)
+        p1 = (np.cos(alphas[i]+np.pi/2),np.sin(alphas[i]+np.pi/2)) if theta > 0 else (np.cos(alphas[i]-np.pi/2),np.sin(alphas[i]-np.pi/2))
+        p2 = (np.cos(alphas[i+1]-np.pi/2),np.sin(alphas[i+1]-np.pi/2)) if theta > 0 else (np.cos(alphas[i+1]+np.pi/2),np.sin(alphas[i+1]+np.pi/2))
+        p3 = np.array((np.cos(alphas[i+1]),np.sin(alphas[i+1])))
+        p0 = _vects[-1]
+        p1 = t*np.array(p1) + p0 
+        p2 = t*np.array(p2) + p3 
+        _vects.extend([p1,p2,p3])
+    assert len(_codes) == len(_vects)
+    return _codes,_vects
 # xy,angle
 def to_xy(xy):
     try:

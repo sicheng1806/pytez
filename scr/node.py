@@ -1,3 +1,43 @@
+'''
+此模块提供Node类和Drawable类，Drawable可以视为maplotlib内的一个artist，node则是Drawable的集合并在其基础上添加了锚点功能。
+
+关于自定义Drawable和Style的说明
+====================================
+
+自定义Drawable允许扩展各类artist至pytez。
+
+自定义Drawable的方法是继承Drawable类，并设置drawtype、和style_types两个类属性，前者为Drawable的类型或者叫名字，用于支持get_drawable方法调用其，后者为drawable支持的style类型，需是个元组。
+Drawable会根据style_types的值生成对style参数的check函数，确保style参数正确。此外还需要实现get_anchor_segement(提供node锚点计算所需的segment),_get_artist(生成matplotlib的类)
+_style_to_mpl_kwargs(用于在设置Drawable样式时将样式参数转换为mpl参数，即生成的artist的set函数可以接收的参数)，最后将自定义的类通过register_drawable(your_drawable_cls)注册即可使用。
+
+自定义style允许扩展自己定义的样式
+
+自定义样式需要通过 register_style(name,default_style,style_check)函数来设置。name是样式的名称，default_style是默认样式，style_check是检查样式合法性的函数。
+
+自定义样式的核心在于设置style_check函数。注册过得check函数会在两处地方被使用，第一处是指定了 style_types中含有样式名的Drawable类在初始化和设置样式的时候会使用，第二处是
+在调用Canvas.set_style函数时会使用，用于检查样式设置的正确性。
+
+注意事项
+---------
+
+1. 样式主要用于生成Drawable类，和设置Drawable类的样式过程中。因而check函数通用的定义形式为：
+
+   ``` def check_your_style(**style) -> style_dict ```
+
+2. 如果我的样式值为字典类型，可以只输入部分值嘛，check函数该如何设置？
+
+   取决与check 函数的设置，如果你的check函数会自动补全缺失的键，那么在Drawable调用时不会出现问题。但是在设置样式时CTX样式对应的残缺的值会被默认值取代。
+   而在load_style中支持字典样式值的自动补全。可以保证设置的样式值作用于生成的Drawable类。
+
+   如果check 函数不会自动补全缺失的键，那么可以认为样式值是残缺的，不安全的，此时如果Drawable类没有自动补全机制，那么Drawable无法正常使用，而set_style也同理。
+   因此，在check函数会自动补全的情况下，可以只输入部分值。check函数没有自动补全，则认为只支持完整的字典值。
+
+3. check函数如何设置
+
+    check函数接收预定的样式，且返回预定样式完整的值。
+'''
+
+
 import matplotlib.patches as mpatch
 from matplotlib.path import Path
 import re 
@@ -6,8 +46,8 @@ from matplotlib.colors import to_rgba
 from abc import abstractmethod,ABC
 from types import FunctionType
 
-from utilities import segment_to_CV,to_xy,to_rad,codes_vects_to_segment
-from bezier import segment_to_coefs,coefs_to_center,coefs_to_length_and_nodeweight,get_bezier_point,bezier_line_intersection
+from utilities import segment_to_CV,to_xy,to_rad,codes_vects_to_segment,check_segment,getUnitCircle_CV
+from bezier import segment_to_coefs,coefs_to_center,coefs_to_area,coefs_to_length_and_nodeweight,get_bezier_point,bezier_line_intersection
 from matrix import get_transform_by_rad,get_transform_by_reverse,get_xy_by_transform
 
 ##############################################################################
@@ -19,7 +59,7 @@ from matrix import get_transform_by_rad,get_transform_by_reverse,get_xy_by_trans
 ## style检查函数会同时在drawable 以及 canvas使用
 
 RE_float = r"-?(\d+(\.\d+)?|\.\d+)"
-RE_node_name= RE_anchor_name = r"[a-z|_|\d]+"
+RE_node_name= RE_anchor_name = r"[a-z|_|\d][a-z|_|\d|-]*"
 
 _tg_style = {
     "total" : {
@@ -28,7 +68,7 @@ _tg_style = {
         "zorder" : None,
         "clipon" : True
     },
-    "line" : {
+    "path" : {
         "fill" : None,
         "hatch" : None,
         "stroke" : None,
@@ -109,7 +149,7 @@ def _check_stroke(stroke):
     else:
         raise TypeError(f"{stroke}类型错误,支持的stroke类型为stroke_str和字典类型")
 
-def check_line(**style):
+def check_path(**style):
     _hatch_str = ('/', '\\', '|', '-', '+', 'x', 'o', 'O', '.', '*',None)
     for k,v in style.items():
         match k:
@@ -128,7 +168,7 @@ def check_line(**style):
 
 _tg_style_check = {
     "total" : check_total,
-    "line" : check_line,
+    "path" : check_path,
 }
 
 class Drawable(ABC):
@@ -206,6 +246,7 @@ class Drawable(ABC):
         verts = []
         for seg in self._segment:
             verts.extend(seg[1:])
+        #if not verts: verts = [(0,0)]
         xs,ys = zip(*verts)
         return (min(xs),min(ys)),(max(xs),max(ys))
     # segment to Path
@@ -241,7 +282,7 @@ class PathDrawable(Drawable):
 
     # type , style_types
     drawtype = "path"
-    style_types = ("line",)
+    style_types = ("path",)
     # 生成artist
     def _get_artist(self):
         '''通过标准的segment以及支持的style返回artist'''
@@ -281,7 +322,7 @@ _tg_drawables = {
 }
 
 def register_style(name,default_style,style_check):
-    if name in ("total","line") or not isinstance(name,str) : raise ValueError("%s 不是合法的name参数" % name)
+    if name in ("total","path") or not isinstance(name,str) : raise ValueError("%s 不是合法的name参数" % name)
     if not isinstance(default_style,dict):
         raise TypeError("default_style 必需为 dict 类型")
     if not isinstance(style_check,FunctionType):
@@ -292,8 +333,8 @@ def register_style(name,default_style,style_check):
 def register_drawable(drawable_cls):
     '''注册一个drawable实例'''
 
-    if not isinstance(drawable_cls,Drawable):
-        raise ValueError("%s Not a subclass from %s" % (drawable_cls,PathDrawable))
+    if not issubclass(drawable_cls,Drawable):
+        raise ValueError("%s Not a subclass from %s" % (drawable_cls,Drawable))
     try:
         type_ = drawable_cls.drawtype
     except :
@@ -304,11 +345,13 @@ def get_drawable(drawtype,segment,**style):
     if drawtype not in _tg_drawables : raise ValueError("drawable : %s does not exist" % drawtype)
     return _tg_drawables[drawtype](segment=segment,**style)
 
-##############################################################################################
-################   add style and drawable by register  ####################################### 
+###############################################################
+##                注册常用Style和Dawable                       ##
+###############################################################
 
-# add circle style 
+# circle style
 def check_circle(**style):
+    # 在path style的基础上增加了radius
     if "radius" in style:
         r = style.pop("radius")
         try:
@@ -318,15 +361,25 @@ def check_circle(**style):
                 r = to_xy((float(r),float(r)))
             except :
                 raise ValueError("%s not a supported radius value: flaot or (2,1)float array" % r)
-    style = check_line(**style)
-    style["radius"] = r
+    else: r = None
+    style = check_path(**style)
+    if r is not None: style["radius"] = r
     return style
-register_style(name="circle",default_style={"radius":(1,1)} | _tg_style["line"] ,style_check= check_circle )
-
-# add mark Drawable and style
-_tg_symbol = {">":"arrow"}
+register_style(name="circle",default_style={"radius":(1,1)} | _tg_style["path"] ,style_check= check_circle )
+# mark style and drawable
+_tg_symbol = {
+    ">":"arrow",
+    "|>":"triangle",
+    "<>":"diamond",
+    "[]":"rect",
+    "]":"bracket",
+    "|":"bar",
+    "o":"circle",
+    "+":"plus",
+    "x":"x",
+    "*":"star"}
 def check_mark(**style):
-    _mark_style = ("symbol","pos","angle","scale","reverse")
+    _mark_style = ("symbol","poses","angle","scale","reverse")
     _symbol_dct = _tg_symbol
     mark_dct = {}
     for mk in _mark_style:
@@ -334,42 +387,53 @@ def check_mark(**style):
     for k,v in mark_dct.items():
         match k:
             case "symbol" : 
-                if v in _symbol_dct: v = _symbol_dct[v] # 消除别名
-                if v not in _symbol_dct.values(): raise ValueError("%s is bad symbol,supported symbol : %s" %(v,_symbol_dct))
+                if v is not None:
+                    if isinstance(v,str):
+                        if v in _symbol_dct: v = _symbol_dct[v] # 消除别名
+                        if v not in _symbol_dct.values(): raise ValueError("%s is bad symbol,supported symbol str : %s" %(v,_symbol_dct))
+                    else:
+                        try:
+                            v = check_segment(v)
+                        except:
+                            raise ValueError("bad symbol,symbol can be a segment or symbol str,yours:%s"%v)
             case "scale":
                 try:
                     v = to_xy(v)
                 except:
-                    raise ValueError("%s is bad %s" % (v,k))
+                    try:
+                        v = to_xy((v,v))
+                    except:
+                        raise ValueError("%s is bad %s" % (v,k))
             case "angle":
                 v = to_rad(v)
             case "reverse":
                 if not isinstance(v,bool): raise TypeError("%s must be a bool value,yours : %s" %(k,v))
-            case "pos":
+            case "poses":
                 try:
                     v = [to_xy(xy) for xy in v]
                 except:
-                    raise ValueError("%s is bad %s , pos must be a (N,2) shape array of float" % (v,k))
-
+                    raise ValueError("%s is bad %s , poses must be a (N,2) shape array of float" % (v,k))
         mark_dct[k] = v 
-    style = check_line(**style)
+    style = check_path(**style)
     return mark_dct | style 
-register_style(name="mark",default_style={"symbol":None,"pos":[(0,0)],"angle":0,"scale":(1,1),"reverse":False} | _tg_style["line"],style_check= check_mark)
-
+register_style(name="mark",default_style={"symbol":None,"poses":[(0,0)],"angle":0,"scale":(1,1),"reverse":False} | _tg_style["path"],style_check= check_mark)
 class MarkDrawable(PathDrawable):
     '''MarkDrawable 是一类特殊的PathDrawable，其本身不参与锚点计算，但是可以显示图案在指定位置
     
-    除了和PathDrawable一样的调用方式之外，还支持通过symbol,pos,angle,scale,reverse值来使用一些预定以的mark。
+    除了和PathDrawable一样的调用方式之外，还支持通过symbol,poses,angle,scale,reverse值来使用一些预定以的mark。
     '''
     drawtype = "mark"
     style_types = ("mark",)
     
     
     def _get_artist(self):
-        '''支持symbol,pos,angle,scale,reverse生成预定以artist,前提为segment == []'''
+        '''支持symbol,poses,angle,scale,reverse生成预定以artist,前提为segment == []'''
         if self._segment : return super()._get_artist()
-        symbol,pos,angle,scale,reverse = map(self._style.get,("symbol","pos","angle","scale","reverse"))
-        return self.getMarkbyStyle(symbol=symbol,pos=pos,angle=angle,scale=scale,reverse=reverse)
+        symbol,poses,angle,scale,reverse = map(self._style.pop,("symbol","poses","angle","scale","reverse"))
+        d = self.getMarkbyStyle(symbol=symbol,poses=poses,angle=angle,scale=scale,reverse=reverse,**self._style)
+        self._segment = d._segment
+        self._style = d._style
+        return d._artist
 
     def get_anchor_segment(self):
         '''不参与anchor计算'''
@@ -377,20 +441,59 @@ class MarkDrawable(PathDrawable):
     
     @classmethod
     def getUnitMark_CV(cls,symbol):
+        '''支持通过symbol str 获得 codes和vects'''
         symbol = check_mark(symbol=symbol)["symbol"]
         match symbol:
             case "arrow" :
-                vects = np.array([ (np.cos(np.pi*5/6),np.sin(np.pi*5/6)),(0,0),(np.cos(-np.pi*5/6),np.sin(-np.pi*5/6)) ]) * 0.1
+                x,y = np.cos(np.pi*5/6),np.sin(np.pi*5/6)
+                vects = np.array([(x,y),(0,0),(x,-y)],dtype=float)
                 codes = [ 1,2,2]
-                return codes,vects
+            case "triangle":
+                x,y = np.cos(np.pi*5/6),np.sin(np.pi*5/6)
+                vects = np.array([(x,y),(0,0),(x,-y),(x,y)],dtype=float)
+                codes = [1,2,2,2]
+            case "diamond":
+                x,y = np.cos(np.pi*3/4),np.sin(np.pi*3/4)
+                vects = np.array([(x,y),(0,0),(x,-y),(2*x,0),(x,y)],dtype=float)+(-x,0)
+                codes = [1,2,2,2,2]
+            case "rect":
+                x,y = -1,1
+                vects = np.array([(x,y),(0,y),(0,-y),(x,-y),(x,y)],dtype=float)+(0.5,0)
+                codes = [1,2,2,2,2]
+            case "bracket":
+                x,y = -1,1
+                vects = np.array([(x,y),(0,y),(0,-y),(x,-y)],dtype=float)
+                codes = [1,2,2,2]
+            case "bar":
+                x,y = 0,1
+                vects = np.array([(x,y),(x,-y)],dtype=float)
+                codes = [1,2]
+            case "circle":
+                codes,vects = getUnitCircle_CV()
+            case "plus":
+                x,y = 1,1
+                vects = np.array([(0,y),(0,-y),(-x,0),(x,0)],dtype=float)
+                codes = [1,2,1,2]
+            case "x":
+                x = y = np.sqrt(2)/2
+                vects = np.array([(x,y),(-x,-y),(-x,y),(x,-y)],dtype=float)
+                codes = [1,2,1,2]
+            case "star":
+                x = y = np.sqrt(2)/2
+                vects = np.array([(0,1),(0,-1),(x,y),(-x,-y),(-x,y),(x,-y)],dtype=float)
+                codes = [1,2,1,2,1,2]
             case _:
-                raise ValueError("%s is a bad symbol,supported symbols are : %s" %(symbol,_tg_symbol))
-        
+                raise ValueError("%s is a bad symbol str,supported symbol str are : %s" %(symbol,_tg_symbol))
+        vects = vects * 0.1
+        assert len(codes) == len(vects)
+        return codes,vects
     @classmethod
-    def getMarkbyStyle(cls,symbol,pos,angle=0,scale=(1,1),reverse=False,**style):
-        mark_dct = check_mark(symbol=symbol,pos=pos,angle=angle,scale=scale,reverse=reverse)
-        symbol,pos,angle,scale,reverse = map(mark_dct.get,("symbol","pos","angle","scale","reverse"))
-        codes,vects = cls.getUnitMark_CV(symbol=symbol)
+    def getMarkbyStyle(cls,symbol,poses,angle=0,scale=(1,1),reverse=False,**style):
+        '''通过symbol,poses,angle,scale,reverse的值生成MarkDrawable'''
+        mark_dct = check_mark(symbol=symbol,poses=poses,angle=angle,scale=scale,reverse=reverse)
+        symbol,poses,angle,scale,reverse = map(mark_dct.get,("symbol","poses","angle","scale","reverse"))
+        if symbol is None: raise ValueError("symbol is None, can't build a MarkDrawable")
+        codes,vects = cls.getUnitMark_CV(symbol) if isinstance(symbol,str) else segment_to_CV(symbol)
         vects = vects * scale 
         mat = get_transform_by_rad(np.eye(3),angle)
         if reverse:
@@ -399,18 +502,62 @@ class MarkDrawable(PathDrawable):
         vects = np.array(list(map(_get_xy,vects)))
         _vects = []
         _codes = []
-        for p in pos:
+        for p in poses:
             _vects.extend(vects+p)
             _codes.extend(codes)
         segment = codes_vects_to_segment(_codes,_vects)
-        return cls(segment,**style)
-        
+        return cls(segment,**style)        
+register_drawable(MarkDrawable)
+# line style
+def check_line(**style):
+    # 在path的基础上增加了mark
+    _defautlt_mark_dct = _tg_style["mark"] | {"start":True,"end":False}
+    def _check_line_mark(**mstyle):
+        # 基于mark，添加start,end (bool),且每次返回都是一个完整的mark字典，因为mark这里作为了一整个值，必需具有这些
+        mstyle = _defautlt_mark_dct | mstyle 
+        start,end = mstyle.pop("start"),mstyle.pop("end")
+        if not isinstance(start,bool): raise ValueError("%s must be a bool value , yours : %s" %("start",start) )
+        if not isinstance(end,bool): raise ValueError("%s must be a bool value , yours : %s" %("start",end) )
+        mstyle = check_mark(**mstyle)
+        mstyle["start"],mstyle["end"] = start,end 
+        return mstyle 
+    mark_dct = style.pop("mark",None)
+    path_style = check_path(**style)
+    if mark_dct is not None: 
+        mark_dct = _check_line_mark(**mark_dct)
+        return path_style | {"mark":mark_dct}
+    else:
+        return path_style
+register_style("line",default_style=_tg_style["path"] | {"mark":_tg_style["mark"] | {"start":True,"end":False}},style_check=check_line)
+# arc style
+_tg_arc_mode = ("open","close","pie")
+def check_arc(**style):
+    '''arc style: (mode,radius,mark,stroke,fill,hatch,)——在line的基础上添加了radius和mode'''
+    mode = style.pop("mode",None)
+    radius = style.pop("radius",None)
+    style = check_line(**style)
+    if mode is not None:
+        if mode not in _tg_arc_mode: raise ValueError(f"{mode} is a bad value for arc mode : {_tg_arc_mode}")
+        style["mode"] = mode 
+    if radius is not None:
+        try:
+            radius = float(radius)
+        except:
+            raise ValueError(f"{radius} is a bad value for radius")
+        style["radius"]  = radius 
+    return style
+
+register_style("arc",default_style=_tg_style["line"] | {"radius":1,"mode":"open"},style_check=check_arc)
+# rect style
+register_style("rect",default_style=_tg_style["circle"],style_check=check_circle) # as same as circle
+# bezier style
+register_style("bezier",default_style=_tg_style["line"],style_check=check_line) # as same as line
 
 
 
-
-#############            end of register                 ######################################
-###############################################################################################
+################################################################
+##             end of register                                ##
+################################################################
 
         
 ##########################################################################
@@ -448,13 +595,18 @@ class Node():
         ## _iscontinued,_isgroup,_isclosed,_can_get_intersection,_coefs
         self._iscontinued,self._isclosed = self._is_segment_continued_and_closed(data_segment)
         if not self._iscontinued:
-            self._isgroup = True
-            self._can_get_intersection = True
-            self._coefs = segment_to_coefs(self._get_bounding_segment()) # 路径为边框
+            if data_segment:
+                self._isgroup = True
+                self._can_get_intersection = True
+                self._coefs = segment_to_coefs(self._get_bounding_segment()) # 路径为边框
+            else:
+                self._isgroup = False
+                self._can_get_intersection = False
+                self._coefs = []
         else:
             self._isgroup = False
             self._coefs = segment_to_coefs(data_segment)
-            self._can_get_intersection = True if self._isclosed else False 
+            self._can_get_intersection = True if (self._isclosed and not np.isclose(coefs_to_area(self._coefs),0)) else False 
         ## 设置锚点字典
         self._anchor_dct = {}
         ## 如果可以获取交点，则具有 _center
@@ -512,7 +664,7 @@ class Node():
     def _update_anchor_dct(self,anchor,xy):
         if not re.fullmatch(RE_anchor_name,anchor): raise ValueError("锚点的命名不符合规范")
         xy = to_xy(xy)
-        self._update_anchor_dct[anchor] = xy
+        self._anchor_dct[anchor] = xy
     def add_anchor(self,anchor,xy):
         return self._update_anchor_dct(anchor,xy)
     def _is_segment_continued_and_closed(self,segment):
@@ -602,3 +754,5 @@ class Node():
                                 points.append(p)
                     
         return np.array(points,dtype=float)
+
+assert "total" in _tg_style
